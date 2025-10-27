@@ -272,17 +272,20 @@ class KimchiAssistant:
             # Try to use actual RAG connector if available
             if hasattr(self.rag_connector, 'search_documents'):
                 try:
+                    # Enable detailed observability for debugging
+                    enable_debug = os.getenv('ELASTICSEARCH_DEBUG', 'false').lower() == 'true'
+                    
                     # Use routing topics as search terms
                     search_terms = routing.rag_topics if routing.rag_topics else [query]
                     
                     for term in search_terms:
-                        results = self.rag_connector.search_documents(term, k=3)
+                        results = self.rag_connector.search_documents(term, k=3, debug=enable_debug)
                         if results:
                             knowledge_data[term] = results
                     
                     # If no specific topics yielded results, do a general search
                     if not knowledge_data:
-                        results = self.rag_connector.search_documents(query, k=5)
+                        results = self.rag_connector.search_documents(query, k=5, debug=enable_debug)
                         if results:
                             knowledge_data["search_results"] = results
                 

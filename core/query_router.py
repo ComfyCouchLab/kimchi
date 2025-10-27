@@ -70,16 +70,19 @@ class QueryRouter:
             "live_data": [
                 "What are the recent commits?",
                 "Show me open issues",
-                "What files are in the repository?",
                 "Who are the contributors?",
                 "What's the current state of pull requests?",
                 "When was the last commit?",
                 "List the latest releases",
                 "What branches exist?",
-                "Show me the README file content",
-                "Are there any security issues?"
+                "Are there any security issues?",
+                "Show me recent pull request activity",
+                "What are the latest commit messages?"
             ],
             "knowledge": [
+                "What's this repo about?",
+                "What does this repository do?",
+                "Explain the project architecture",
                 "How do I set up CI/CD?",
                 "What are the best practices for testing?",
                 "How to configure deployment?",
@@ -89,7 +92,12 @@ class QueryRouter:
                 "Best practices for security",
                 "How to optimize performance?",
                 "Deployment strategies explained",
-                "Code review guidelines"
+                "Code review guidelines",
+                "Show me the README file content",
+                "What is this project for?",
+                "How does this system work?",
+                "What are the main features?",
+                "Describe the project structure"
             ],
             "hybrid": [
                 "Analyze recent commits and suggest improvements",
@@ -157,24 +165,35 @@ Analyze this GitHub-related query and determine the optimal data routing strateg
 Query: "{query}"{context_str}
 
 Available Data Sources:
-1. LIVE_DATA (MCP): Real-time GitHub data via API
-   - Recent commits, current issues, live file contents
-   - Active pull requests, repository state, user info
-   - Current branches, releases, contributors
+1. LIVE_DATA (MCP): Real-time GitHub API data only
+   - Recent commits, current issues, live repository metadata
+   - Active pull requests, repository statistics, user info  
+   - Current branches, releases, contributors, timestamps
 
-2. KNOWLEDGE (RAG): Static documentation and best practices
-   - Setup guides, tutorials, configuration docs
-   - Best practices, architectural patterns, workflows
-   - Historical knowledge, troubleshooting guides
+2. KNOWLEDGE (RAG): Repository content and documentation
+   - README content, documentation files, code explanations
+   - Project descriptions, architecture explanations, setup guides
+   - File contents, project structure explanations, tutorials
+   - Best practices, workflows, troubleshooting guides
 
 3. HYBRID: Both sources needed
-   - Analysis combining current state with best practices
-   - Recommendations based on live data and knowledge
-   - Comparisons between current state and standards
+   - Analysis combining current state with documentation
+   - Recommendations based on live data and repository content
+   - Comparisons between current state and documented standards
 
-Examples:
-LIVE_DATA: "What are recent commits?", "Show open issues", "List current files"
-KNOWLEDGE: "How to setup CI/CD?", "Best practices for testing", "Deployment guide"
+IMPORTANT ROUTING RULES:
+- If asking WHAT a repository/project is about → ALWAYS use KNOWLEDGE (RAG has README/docs)
+- If asking about repository PURPOSE, DESCRIPTION, or FUNCTIONALITY → use KNOWLEDGE  
+- If asking WHO contributed recently → use LIVE_DATA (MCP has commit history)  
+- If asking HOW to set something up → use KNOWLEDGE (RAG has documentation)
+- If asking WHEN something happened → use LIVE_DATA (MCP has timestamps)
+- If asking about RECENT/CURRENT state → use LIVE_DATA (MCP has live data)
+
+Examples by Category:
+KNOWLEDGE: "What's this repo about?", "What does this project do?", "Describe this repository", 
+           "What are the features?", "How does this work?", "Show README content", "Project description"
+LIVE_DATA: "Who committed recently?", "When was last commit?", "How many open issues?", 
+           "List recent commits", "Show current pull requests", "What files are in the repo?"
 HYBRID: "Analyze recent commits and suggest improvements", "Review issues and provide solutions"
 
 Respond in JSON format:
@@ -250,11 +269,37 @@ Analyze the query and provide routing decision:
         """Fallback rule-based routing if AI analysis fails."""
         query_lower = query.lower()
         
-        # Live data keywords
-        live_keywords = ['recent', 'current', 'latest', 'now', 'today', 'open', 'active', 'new', 'who', 'what files', 'commits', 'issues', 'pull request']
+        # Specific repository content patterns (high priority for knowledge)
+        repo_content_patterns = [
+            'what\'s this repo about',
+            'what is this repo about', 
+            'what does this repo do',
+            'what does this repository do',
+            'what is this project',
+            'describe this project',
+            'tell me about this repo',
+            'explain this repository',
+            'project description',
+            'repository description'
+        ]
         
-        # Knowledge keywords
-        knowledge_keywords = ['how to', 'setup', 'configure', 'best practice', 'guide', 'tutorial', 'deploy', 'install', 'architecture', 'pattern']
+        # Check for direct repository content questions first
+        for pattern in repo_content_patterns:
+            if pattern in query_lower:
+                return RoutingDecision(
+                    query_type=QueryType.KNOWLEDGE,
+                    confidence=0.9,
+                    reasoning="Direct repository content/description question - routed to RAG",
+                    mcp_tools=[],
+                    rag_topics=["architecture", "setup", "best_practices"],
+                    priority="rag"
+                )
+        
+        # Live data keywords (more specific matching)
+        live_keywords = ['recent commits', 'latest commits', 'current issues', 'open issues', 'new issues', 'active pull', 'who committed', 'when was', 'list files', 'show files']
+        
+        # Knowledge keywords  
+        knowledge_keywords = ['how to', 'setup', 'configure', 'best practice', 'guide', 'tutorial', 'deploy', 'install', 'architecture', 'pattern', 'what is', 'what does', 'explain', 'describe']
         
         # Hybrid keywords
         hybrid_keywords = ['analyze', 'review', 'recommend', 'suggest', 'improve', 'audit', 'compare', 'optimize']
@@ -266,14 +311,14 @@ Analyze the query and provide routing decision:
         if hybrid_score > 0:
             query_type = QueryType.HYBRID
             confidence = 0.7
+        elif knowledge_score > live_score:
+            query_type = QueryType.KNOWLEDGE
+            confidence = 0.7
         elif live_score > knowledge_score:
             query_type = QueryType.LIVE_DATA
             confidence = 0.6
-        elif knowledge_score > live_score:
-            query_type = QueryType.KNOWLEDGE
-            confidence = 0.6
         else:
-            query_type = QueryType.HYBRID
+            query_type = QueryType.KNOWLEDGE  # Default to knowledge for ambiguous cases
             confidence = 0.5
         
         return RoutingDecision(

@@ -71,21 +71,29 @@ class DocumentProcessor:
     
     def _setup_parsers(self) -> List[Tuple[Any, List[str]]]:
         """Setup document parsers with their corresponding file extensions."""
-        return [
-            (SentenceSplitter(
-                chunk_size=self.config.chunk_size, 
-                chunk_overlap=self.config.chunk_overlap
-            ), [".md"]),
-            (MarkdownNodeParser(), [".md"]),
-            # Uncomment and configure as needed:
-            # (CodeSplitter(language='python', max_chars=self.config.max_chars), [".py", ".ipynb"]),
-            # (CodeSplitter(language='typescript', max_chars=self.config.max_chars), [".ts"]),
-            # (CodeSplitter(language='go', max_chars=self.config.max_chars), [".go"]),
-            # (CodeSplitter(language='javascript', max_chars=self.config.max_chars), [".js"]),
-            # (CodeSplitter(language='bash', max_chars=self.config.max_chars), [".bash", ".sh"]),
-            # (CodeSplitter(language='yaml', max_chars=self.config.max_chars), [".yaml", ".yml"]),
-            # (JSONNodeParser(), [".json"]),
-        ]
+        try:
+            parsers = [
+                (SentenceSplitter(
+                    chunk_size=self.config.chunk_size, 
+                    chunk_overlap=self.config.chunk_overlap
+                ), [".md"]),
+                (MarkdownNodeParser(), [".md"]),
+                # Uncomment and configure as needed:
+                # (CodeSplitter(language='python', max_chars=self.config.max_chars), [".py", ".ipynb"]),
+                # (CodeSplitter(language='typescript', max_chars=self.config.max_chars), [".ts"]),
+                # (CodeSplitter(language='go', max_chars=self.config.max_chars), [".go"]),
+                # (CodeSplitter(language='javascript', max_chars=self.config.max_chars), [".js"]),
+                # (CodeSplitter(language='bash', max_chars=self.config.max_chars), [".bash", ".sh"]),
+                # (CodeSplitter(language='yaml', max_chars=self.config.max_chars), [".yaml", ".yml"]),
+                # (JSONNodeParser(), [".json"]),
+            ]
+            return parsers
+        except Exception as e:
+            print(f"⚠️  Error setting up parsers: {e}")
+            # Return a minimal fallback configuration
+            return [
+                (SentenceSplitter(chunk_size=500, chunk_overlap=20), [".md"]),
+            ]
     
     def parse_documents(self, repo_path: str, verbose: bool = True) -> List[Any]:
         """
@@ -248,11 +256,22 @@ class ElasticsearchConnector:
         nest_asyncio.apply()
         load_dotenv('.env')
         
+        # Verify OpenAI API key is available
+        if not os.getenv('OPENAI_API_KEY'):
+            raise ElasticsearchConnectorError(
+                "OPENAI_API_KEY not found in environment variables. "
+                "Please ensure it's set in your .env file."
+            )
+        
         self.config = config or self._load_config_from_env()
         self.embedding_model = embedding_model
         
         # Configure LlamaIndex settings
-        Settings.embed_model = OpenAIEmbedding(model=self.embedding_model)
+        try:
+            Settings.embed_model = OpenAIEmbedding(model=self.embedding_model)
+            print(f"✅ OpenAI embedding model '{self.embedding_model}' configured successfully")
+        except Exception as e:
+            raise ElasticsearchConnectorError(f"Failed to configure OpenAI embedding model: {e}")
         
         self.vector_store = None
         self.document_processor = DocumentProcessor()
@@ -349,13 +368,14 @@ class ElasticsearchConnector:
         except Exception as e:
             raise ElasticsearchConnectorError(f"Failed to ingest documents: {str(e)}")
     
-    def search_documents(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+    def search_documents(self, query: str, k: int = 5, debug: bool = True) -> List[Dict[str, Any]]:
         """
-        Search for documents using vector similarity.
+        Search for documents using vector similarity with detailed observability.
         
         Args:
             query: Search query string
             k: Number of results to return
+            debug: Enable detailed logging of search process
             
         Returns:
             List of search results with content and metadata
@@ -364,36 +384,79 @@ class ElasticsearchConnector:
             if not self.vector_store:
                 raise ElasticsearchConnectorError("Vector store not initialized. Call connect() first.")
             
+            if debug:
+                print(f"\n🔍 ELASTICSEARCH SEARCH DEBUG")
+                print(f"{'='*50}")
+                print(f"📝 Original Query: '{query}'")
+                print(f"🎯 Results requested (k): {k}")
+                print(f"📊 Index: {self.config.index_name}")
+                print(f"🤖 Embedding Model: {self.embedding_model}")
+            
             # Create a VectorStoreIndex from the existing store
             from llama_index.core import VectorStoreIndex
             from llama_index.core import Settings
             
             # Set up embedding model
             from llama_index.embeddings.openai import OpenAIEmbedding
-            Settings.embed_model = OpenAIEmbedding(model=self.embedding_model)
+            embed_model = OpenAIEmbedding(model=self.embedding_model)
+            Settings.embed_model = embed_model
+            
+            # Generate embedding for the query to show what's being searched
+            if debug:
+                query_embedding = embed_model.get_text_embedding(query)
+                print(f"🧮 Query Embedding Dimensions: {len(query_embedding)}")
+                print(f"🧮 First 5 embedding values: {query_embedding[:5]}")
             
             # Create index
             index = VectorStoreIndex.from_vector_store(self.vector_store)
             
-            # Create query engine
-            query_engine = index.as_query_engine(similarity_top_k=k)
+            # Create query engine with custom retriever for observability
+            retriever = index.as_retriever(similarity_top_k=k)
             
-            # Perform query
-            response = query_engine.query(query)
+            if debug:
+                print(f"\n🔄 Performing vector similarity search...")
             
-            # Format results
+            # Perform retrieval to get detailed information
+            nodes = retriever.retrieve(query)
+            
+            if debug:
+                print(f"📊 Retrieved {len(nodes)} nodes")
+                if hasattr(self.vector_store, '_client'):
+                    # Try to get the last query executed (if available)
+                    try:
+                        # This is a workaround to show what's happening under the hood
+                        print(f"📍 Vector Store Type: {type(self.vector_store).__name__}")
+                        if hasattr(self.vector_store, '_index'):
+                            print(f"📍 ES Index Name: {self.vector_store._index}")
+                    except Exception as e:
+                        print(f"📍 Could not retrieve ES details: {e}")
+            
+            # Format results with enhanced metadata
             formatted_results = []
-            for node in response.source_nodes:
-                formatted_results.append({
+            for i, node in enumerate(nodes):
+                result = {
                     'content': node.node.text,
                     'metadata': node.node.metadata,
-                    'score': node.score
-                })
+                    'score': node.score if hasattr(node, 'score') else 'N/A',
+                    'node_id': node.node.node_id if hasattr(node.node, 'node_id') else f'node_{i}'
+                }
+                formatted_results.append(result)
+                
+                if debug:
+                    print(f"\n📄 Result {i+1}:")
+                    print(f"  🏷️  Score: {result['score']}")
+                    print(f"  🆔 Node ID: {result['node_id']}")
+                    print(f"  📁 Metadata: {result['metadata']}")
+                    print(f"  📝 Content preview: {result['content'][:200]}...")
+            
+            if debug:
+                print(f"\n{'='*50}")
+                print(f"✅ Search completed successfully")
             
             return formatted_results
             
         except Exception as e:
-            print(f"Search error: {e}")
+            print(f"❌ Search error: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -450,3 +513,220 @@ class ElasticsearchConnector:
             'embedding_model': self.embedding_model,
             'connected': self.vector_store is not None
         }
+    
+    def enable_elasticsearch_query_logging(self) -> None:
+        """
+        Enable detailed Elasticsearch query logging to see exactly what queries are executed.
+        This will show the raw ES queries being sent to the cluster.
+        """
+        try:
+            import logging
+            import elasticsearch
+            
+            # Enable elasticsearch library debug logging
+            es_logger = logging.getLogger('elasticsearch')
+            es_logger.setLevel(logging.DEBUG)
+            
+            # Create console handler if not exists
+            if not es_logger.handlers:
+                console_handler = logging.StreamHandler()
+                formatter = logging.Formatter('🔍 ES Query: %(message)s')
+                console_handler.setFormatter(formatter)
+                es_logger.addHandler(console_handler)
+            
+            # Enable trace logging for detailed request/response info
+            trace_logger = logging.getLogger('elasticsearch.trace')
+            trace_logger.setLevel(logging.DEBUG)
+            
+            if not trace_logger.handlers:
+                trace_handler = logging.StreamHandler()
+                trace_formatter = logging.Formatter('📡 ES Trace: %(message)s')
+                trace_handler.setFormatter(trace_formatter)
+                trace_logger.addHandler(trace_handler)
+            
+            print("✅ Elasticsearch query logging enabled")
+            print("📋 You will now see raw ES queries in the console")
+            
+        except Exception as e:
+            print(f"⚠️  Could not enable ES query logging: {e}")
+
+    def get_index_mapping(self) -> Dict[str, Any]:
+        """
+        Get the current index mapping to understand the document structure.
+        
+        Returns:
+            Dict containing the index mapping information
+        """
+        try:
+            if not self.vector_store:
+                return {"error": "Vector store not available"}
+            
+            print(f"\n📋 INDEX MAPPING FOR '{self.config.index_name}':")
+            print("="*60)
+            
+            # Try to access the underlying Elasticsearch client
+            if hasattr(self.vector_store, '_client'):
+                client = self.vector_store._client
+                try:
+                    mapping = client.indices.get_mapping(index=self.config.index_name)
+                    import json
+                    print(json.dumps(mapping, indent=2))
+                    return mapping
+                except Exception as e:
+                    print(f"Could not retrieve mapping via direct client: {e}")
+            
+            # Alternative approach - try to get basic info
+            print("📍 Using LlamaIndex ElasticsearchStore")
+            print(f"📍 Index Name: {self.config.index_name}")
+            print(f"📍 Vector Store Type: {type(self.vector_store).__name__}")
+            
+            return {
+                "index_name": self.config.index_name,
+                "vector_store_type": type(self.vector_store).__name__,
+                "note": "Direct mapping access not available through LlamaIndex abstraction"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error getting index mapping: {e}")
+            return {"error": str(e)}
+
+    def get_index_stats(self) -> Dict[str, Any]:
+        """
+        Get index statistics to understand the data volume and structure.
+        
+        Returns:
+            Dict containing index statistics
+        """
+        try:
+            if not self.vector_store:
+                return {"error": "Vector store not available"}
+            
+            print(f"\n📊 INDEX STATISTICS FOR '{self.config.index_name}':")
+            print("="*60)
+            
+            # Try to access the underlying Elasticsearch client
+            if hasattr(self.vector_store, '_client'):
+                client = self.vector_store._client
+                try:
+                    # Get index stats
+                    stats = client.indices.stats(index=self.config.index_name)
+                    
+                    # Get document count
+                    count_result = client.count(index=self.config.index_name)
+                    doc_count = count_result['count']
+                    
+                    print(f"📄 Total documents: {doc_count}")
+                    
+                    if self.config.index_name in stats['indices']:
+                        index_stats = stats['indices'][self.config.index_name]
+                        total_size = index_stats['total']['store']['size_in_bytes']
+                        print(f"💾 Total size: {total_size:,} bytes ({total_size/1024/1024:.2f} MB)")
+                        print(f"🔍 Total searches: {index_stats['total']['search']['query_total']}")
+                        print(f"⏱️  Search time: {index_stats['total']['search']['query_time_in_millis']} ms")
+                    
+                    return {
+                        "document_count": doc_count,
+                        "stats": stats,
+                        "index_name": self.config.index_name
+                    }
+                    
+                except Exception as e:
+                    print(f"Could not retrieve stats via direct client: {e}")
+            
+            # Alternative approach
+            print("📍 Using LlamaIndex ElasticsearchStore (limited stats)")
+            print(f"📍 Index Name: {self.config.index_name}")
+            print(f"📍 Vector Store Type: {type(self.vector_store).__name__}")
+            
+            return {
+                "index_name": self.config.index_name,
+                "vector_store_type": type(self.vector_store).__name__,
+                "note": "Direct stats access not available through LlamaIndex abstraction"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error getting index stats: {e}")
+            return {"error": str(e)}
+
+    def sample_documents(self, size: int = 5) -> List[Dict[str, Any]]:
+        """
+        Get a sample of documents from the index to understand the data structure.
+        
+        Args:
+            size: Number of sample documents to retrieve
+            
+        Returns:
+            List of sample documents
+        """
+        try:
+            if not self.vector_store:
+                return []
+            
+            print(f"\n📄 SAMPLE DOCUMENTS FROM '{self.config.index_name}':")
+            print("="*60)
+            
+            # Try to access the underlying Elasticsearch client
+            if hasattr(self.vector_store, '_client'):
+                client = self.vector_store._client
+                try:
+                    # Search for sample documents
+                    response = client.search(
+                        index=self.config.index_name,
+                        body={
+                            "size": size,
+                            "query": {"match_all": {}}
+                        }
+                    )
+                    
+                    documents = []
+                    for i, hit in enumerate(response['hits']['hits']):
+                        doc = hit['_source']
+                        documents.append(doc)
+                        
+                        print(f"\n🔖 Document {i+1}:")
+                        print(f"  🆔 ID: {hit['_id']}")
+                        
+                        # Show key fields
+                        if 'content' in doc:
+                            text_preview = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
+                            print(f"  📝 Content: {text_preview}")
+                        
+                        if 'text' in doc:
+                            text_preview = doc['text'][:200] + "..." if len(doc['text']) > 200 else doc['text']
+                            print(f"  📝 Text: {text_preview}")
+                        
+                        if 'metadata' in doc:
+                            print(f"  📁 Metadata: {doc['metadata']}")
+                        
+                        if 'embedding' in doc:
+                            print(f"  🧮 Has embedding: {len(doc['embedding'])} dimensions")
+                        
+                        # Show all available fields
+                        print(f"  🔧 Available fields: {list(doc.keys())}")
+                    
+                    return documents
+                    
+                except Exception as e:
+                    print(f"Could not retrieve samples via direct client: {e}")
+            
+            # Alternative approach - use search_documents to get samples
+            print("📍 Using search_documents method to get samples")
+            results = self.search_documents("*", k=size, debug=False)
+            
+            for i, result in enumerate(results[:size]):
+                print(f"\n🔖 Document {i+1} (via search):")
+                print(f"  🏆 Score: {result.get('score', 'N/A')}")
+                
+                content = result.get('content', '')
+                if content:
+                    preview = content[:200] + "..." if len(content) > 200 else content
+                    print(f"  📝 Content: {preview}")
+                
+                if result.get('metadata'):
+                    print(f"  📁 Metadata: {result['metadata']}")
+            
+            return results[:size]
+            
+        except Exception as e:
+            print(f"❌ Error sampling documents: {e}")
+            return []

@@ -9,3 +9,12 @@ spacy==3.8.7
 IPython==8.18.1
 tabulate==0.9.0
 streamlit==1.50.0
+httpx>=0.25.0
+# MCP (Model Context Protocol) dependencies
+mcp>=1.0.0
+# OpenAI API for hybrid assistant
+openai>=1.0.0
+# Test dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0

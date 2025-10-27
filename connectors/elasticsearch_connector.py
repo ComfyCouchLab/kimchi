@@ -349,11 +349,93 @@ class ElasticsearchConnector:
         except Exception as e:
             raise ElasticsearchConnectorError(f"Failed to ingest documents: {str(e)}")
     
+    def search_documents(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for documents using vector similarity.
+        
+        Args:
+            query: Search query string
+            k: Number of results to return
+            
+        Returns:
+            List of search results with content and metadata
+        """
+        try:
+            if not self.vector_store:
+                raise ElasticsearchConnectorError("Vector store not initialized. Call connect() first.")
+            
+            # Create a VectorStoreIndex from the existing store
+            from llama_index.core import VectorStoreIndex
+            from llama_index.core import Settings
+            
+            # Set up embedding model
+            from llama_index.embeddings.openai import OpenAIEmbedding
+            Settings.embed_model = OpenAIEmbedding(model=self.embedding_model)
+            
+            # Create index
+            index = VectorStoreIndex.from_vector_store(self.vector_store)
+            
+            # Create query engine
+            query_engine = index.as_query_engine(similarity_top_k=k)
+            
+            # Perform query
+            response = query_engine.query(query)
+            
+            # Format results
+            formatted_results = []
+            for node in response.source_nodes:
+                formatted_results.append({
+                    'content': node.node.text,
+                    'metadata': node.node.metadata,
+                    'score': node.score
+                })
+            
+            return formatted_results
+            
+        except Exception as e:
+            print(f"Search error: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    async def initialize(self) -> None:
+        """Initialize the connector for use in async context."""
+        try:
+            self.vector_store = self.connect()
+        except Exception as e:
+            raise ElasticsearchConnectorError(f"Failed to initialize: {e}")
+
     def close(self) -> None:
         """Close Elasticsearch connection."""
-        if hasattr(self.vector_store, "close"):
-            self.vector_store.close()
-        print("Elasticsearch connection closed.")
+        try:
+            if self.vector_store:
+                # Close the vector store if it has a close method
+                if hasattr(self.vector_store, "close"):
+                    self.vector_store.close()
+                
+                # Close the underlying Elasticsearch client
+                if hasattr(self.vector_store, '_client') and self.vector_store._client:
+                    try:
+                        # Close async client if it exists
+                        if hasattr(self.vector_store._client, 'close'):
+                            import asyncio
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # Schedule close in the background
+                                    asyncio.create_task(self.vector_store._client.close())
+                                else:
+                                    # Run close synchronously
+                                    asyncio.run(self.vector_store._client.close())
+                            except:
+                                pass
+                    except Exception as e:
+                        print(f"Warning: ES client close error: {e}")
+                
+                self.vector_store = None
+            print("Elasticsearch connection closed.")
+        except Exception as e:
+            print(f"Warning: Error closing Elasticsearch connection: {e}")
     
     def get_store_info(self) -> Dict[str, Any]:
         """

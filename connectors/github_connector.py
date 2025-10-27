@@ -102,7 +102,13 @@ class GitHubConnector:
     
     def get_clone_url(self) -> str:
         """Get the clone URL for the repository."""
-        return f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        token = os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN') or os.getenv('GITHUB_TOKEN')
+        if token:
+            # Use token in URL for private repositories
+            return f"https://{token}@github.com/{self.config.owner}/{self.config.repo}.git"
+        else:
+            # Fall back to standard URL for public repositories
+            return f"https://github.com/{self.config.owner}/{self.config.repo}.git"
     
     def clone_repository(self, force_reclone: bool = False) -> str:
         """

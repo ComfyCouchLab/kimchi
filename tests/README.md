@@ -1,19 +1,35 @@
 # Test Suite for Kimchi Project
 
-This directory contains comprehensive tests for the GitHub connector and Elasticsearch connector modules.
+This directory contains comprehensive tests for the hybrid RAG + MCP GitHub assistant.
 
 ## Test Structure
 
 ```
 tests/
 ├── __init__.py                    # Test package initialization
-├── test_github_connector.py       # Unit tests for GitHub connector
-├── test_elasticsearch_connector.py # Unit tests for Elasticsearch connector  
+├── test_github_connector.py       # Unit tests for GitHub connector (RAG)
+├── test_elasticsearch_connector.py # Unit tests for Elasticsearch connector
+├── test_mcp_connector.py          # Unit tests for MCP GitHub connector
+├── test_query_router.py           # Unit tests for AI-powered query router
+├── test_enhanced_assistant.py     # Unit tests for KimchiAssistant (core)
 ├── test_integration.py            # Integration tests for complete workflow
 ├── test_utils.py                  # Test utilities and helpers
 ├── run_tests.py                   # Test runner script
 └── README.md                      # This file
 ```
+
+## Test Categories
+
+### Unit Tests
+- **test_github_connector.py**: Tests for RAG GitHub connector functionality
+- **test_elasticsearch_connector.py**: Tests for Elasticsearch operations
+- **test_mcp_connector.py**: Tests for MCP (Model Context Protocol) connector
+- **test_query_router.py**: Tests for AI-powered query routing logic
+- **test_enhanced_assistant.py**: Tests for `KimchiAssistant` core orchestration
+
+### Integration Tests
+- **test_integration.py**: End-to-end workflow tests
+- Real API integration tests (require tokens/credentials)
 
 ## Running Tests
 
@@ -24,30 +40,40 @@ tests/
 python -m tests.run_tests
 
 # Run specific test module
-python -m tests.run_tests test_github_connector
+python -m tests.run_tests test_mcp_connector
+python -m tests.run_tests test_query_router
+python -m tests.run_tests test_enhanced_assistant  # Tests KimchiAssistant
 
 # Run individual test
-python -m unittest tests.test_github_connector.TestGitHubConnector.test_clone_repository_success
+python -m unittest tests.test_mcp_connector.TestMCPGitHubClient.test_client_initialization
 ```
 
 ### Using pytest (recommended)
 
 ```bash
 # Install test dependencies first
-pip install -r test-requirements.txt
+pip install pytest pytest-asyncio pytest-cov
 
 # Run all tests
 pytest
 
 # Run specific test file
-pytest tests/test_github_connector.py
+pytest tests/test_mcp_connector.py
+pytest tests/test_query_router.py
+pytest tests/test_enhanced_assistant.py
 
 # Run tests with coverage
-pytest --cov=connectors --cov-report=html
+pytest --cov=core --cov=connectors --cov=cli --cov=utils --cov-report=html
+
+# Run async tests specifically
+pytest -k "test_" tests/test_mcp_connector.py
+pytest -k "test_" tests/test_enhanced_assistant.py  # Tests KimchiAssistant
 
 # Run tests with specific markers
 pytest -m unit          # Only unit tests
 pytest -m integration   # Only integration tests
+pytest -m asyncio       # Only async tests
+```
 pytest -m github        # Only GitHub connector tests
 pytest -m elasticsearch # Only Elasticsearch connector tests
 ```

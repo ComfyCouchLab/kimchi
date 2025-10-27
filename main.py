@@ -1,155 +1,113 @@
+#!/usr/bin/env python3
 """
-Main application orchestrating the GitHub and Elasticsearch connectors.
+Kimchi - Hybrid RAG + MCP GitHub Assistant
 
-This module provides the main entry point for the application that:
-1. Clones a GitHub repository using GitHubConnector
-2. Processes documents and creates embeddings using ElasticsearchConnector
-3. Stores the embeddings in Elasticsearch for vector search
+Main entry point for the intelligent GitHub assistant that combines:
+- RAG (Retrieval Augmented Generation) for static knowledge
+- MCP (Model Context Protocol) for live GitHub data
+- AI-powered routing for optimal responses
+
+Usage:
+    python main.py                           # Interactive mode
+    python main.py "What are recent commits?" # Single query mode
+    python main.py --help                    # Show help
 """
 
+import asyncio
+import argparse
 import sys
-from typing import Optional
+from pathlib import Path
+import traceback
 
-from connectors import GitHubConnector, ElasticsearchConnector
-from connectors.github_connector import GitHubConfig, GitHubConnectorError
-from connectors.elasticsearch_connector import ElasticsearchConfig, ElasticsearchConnectorError
-from config import load_config, ConfigurationError
+# Add current directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Set up quiet logging early to suppress verbose messages
+from utils.logging import setup_quiet_logging
+setup_quiet_logging()
+
+from cli.interface import KimchiCLI
 
 
-class KimchiPipeline:
-    """
-    Main pipeline orchestrating GitHub repository processing and Elasticsearch ingestion.
+def create_parser() -> argparse.ArgumentParser:
+    """Create command-line argument parser."""
+    parser = argparse.ArgumentParser(
+        description="Kimchi - Hybrid RAG + MCP GitHub Assistant",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                                    # Interactive mode
+  %(prog)s "What are recent commits?"         # Single query
+  %(prog)s "How do I set up CI/CD?" --debug   # Single query with debug
+  
+Environment Variables:
+  OPENAI_API_KEY          # Required for AI routing and synthesis
+  GITHUB_TOKEN           # Optional for enhanced GitHub access
+  ELASTICSEARCH_URL      # Optional for RAG functionality
+        """
+    )
     
-    This class coordinates the entire workflow:
-    1. Clone/update repository from GitHub
-    2. Parse documents and create embeddings
-    3. Store embeddings in Elasticsearch
-    """
+    parser.add_argument(
+        'query',
+        nargs='?',
+        help='Single query to process (if not provided, enters interactive mode)'
+    )
     
-    def __init__(self, 
-                 github_config: Optional[GitHubConfig] = None,
-                 elasticsearch_config: Optional[ElasticsearchConfig] = None,
-                 embedding_model: str = "text-embedding-3-large"):
-        """
-        Initialize the pipeline with connectors.
-        
-        Args:
-            github_config: Configuration for GitHub operations.
-            elasticsearch_config: Configuration for Elasticsearch operations.
-            embedding_model: OpenAI embedding model to use.
-        """
-        self.github_connector = GitHubConnector(github_config)
-        self.elasticsearch_connector = ElasticsearchConnector(elasticsearch_config, embedding_model)
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug output with full error traces'
+    )
     
-    def run(self, 
-            force_reclone: bool = False, 
-            update_repo: bool = False,
-            verbose: bool = True,
-            show_progress: bool = True) -> None:
-        """
-        Run the complete pipeline.
-        
-        Args:
-            force_reclone: Force fresh clone of repository.
-            update_repo: Try to update existing repository instead of clone.
-            verbose: Enable verbose output during processing.
-            show_progress: Show progress during ingestion.
-        """
-        try:
-            # Step 1: Handle repository operations
-            print("=== GitHub Repository Operations ===")
-            if verbose:
-                repo_info = self.github_connector.get_repository_info()
-                print(f"Repository: {repo_info['owner']}/{repo_info['repo']}")
-                print(f"Branch: {repo_info['branch']}")
-                print(f"Local path: {repo_info['local_path']}")
-                print(f"Exists locally: {repo_info['exists_locally']}")
-            
-            if update_repo:
-                repo_path = self.github_connector.update_repository()
-            else:
-                repo_path = self.github_connector.clone_repository(force_reclone=force_reclone)
-            
-            print(f"Repository ready at: {repo_path}")
-            
-            # Step 2: Process documents and ingest into Elasticsearch
-            print("\n=== Document Processing and Elasticsearch Ingestion ===")
-            if verbose:
-                es_info = self.elasticsearch_connector.get_store_info()
-                print(f"Elasticsearch index: {es_info['index_name']}")
-                print(f"Embedding model: {es_info['embedding_model']}")
-                print(f"Batch size: {es_info['batch_size']}")
-            
-            self.elasticsearch_connector.process_and_ingest_documents(
-                repo_path=repo_path,
-                show_progress=show_progress,
-                verbose=verbose
-            )
-            
-            print("\n=== Pipeline Completed Successfully ===")
-            
-        except (GitHubConnectorError, ElasticsearchConnectorError) as e:
-            print(f"Pipeline failed: {e}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            sys.exit(1)
-        finally:
-            # Ensure Elasticsearch connection is closed
-            self.elasticsearch_connector.close()
+    parser.add_argument(
+        '--version',
+        action='version',
+        version='Kimchi 1.0.0 - Hybrid GitHub Assistant'
+    )
     
-    def get_pipeline_info(self) -> dict:
-        """
-        Get information about the pipeline configuration.
-        
-        Returns:
-            dict: Pipeline configuration information.
-        """
-        return {
-            'github': self.github_connector.get_repository_info(),
-            'elasticsearch': self.elasticsearch_connector.get_store_info()
-        }
+    return parser
 
 
-def main():
-    """Main entry point for the application."""
+async def main():
+    """Main entry point."""
+    parser = create_parser()
+    args = parser.parse_args()
+    
+    # Create CLI instance
+    cli = KimchiCLI()
+    
     try:
-        # Load configuration from environment
-        config = load_config()
-        
-        # Create pipeline with loaded configuration
-        pipeline = KimchiPipeline(
-            github_config=config.github,
-            elasticsearch_config=config.elasticsearch,
-            embedding_model=config.embedding_model
-        )
-        
-        # Print pipeline information
-        print("=== Kimchi Pipeline Starting ===")
-        pipeline_info = pipeline.get_pipeline_info()
-        print(f"GitHub Repository: {pipeline_info['github']['owner']}/{pipeline_info['github']['repo']}")
-        print(f"Branch: {pipeline_info['github']['branch']}")
-        print(f"Elasticsearch Index: {pipeline_info['elasticsearch']['index_name']}")
-        print(f"Embedding Model: {pipeline_info['elasticsearch']['embedding_model']}")
-        print()
-        
-        # Run the pipeline
-        pipeline.run(
-            verbose=config.verbose, 
-            show_progress=config.show_progress
-        )
-        
-    except ConfigurationError as e:
-        print(f"Configuration error: {e}")
-        print("Please check your environment variables and .env file.")
-        sys.exit(1)
+        if args.query:
+            # Single query mode
+            await cli.run_single_query(args.query)
+        else:
+            # Interactive mode
+            await cli.run_interactive()
+    
     except KeyboardInterrupt:
-        print("\nPipeline interrupted by user.")
-        sys.exit(0)
+        print("\nInterrupted. Goodbye!")
     except Exception as e:
-        print(f"Failed to initialize pipeline: {e}")
-        sys.exit(1)
+        print(f"Unexpected error: {e}")
+        if args.debug:
+            traceback.print_exc()
+    finally:
+        # Ensure cleanup always happens
+        try:
+            if cli.initialized and cli.assistant:
+                await cli.assistant.cleanup()
+        except Exception as e:
+            print(f"Warning: Cleanup error: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    # Set up proper event loop for asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+    finally:
+        # Give a moment for cleanup
+        import time
+        time.sleep(0.1)

@@ -1,198 +1,427 @@
-# GitHub Assistant
+# Kimchi - Hybrid RAG + MCP GitHub Assistant
 
-Easily ask questions about your GitHub repository using RAG.
+A sophisticated AI-powered assistant that combines Retrieval-Augmented Generation (RAG) with Model Context Protocol (MCP) to provide intelligent responses about GitHub repositories. The system intelligently routes queries between static knowledge (RAG) and live GitHub data (MCP) for optimal results.
 
-### Key Considerations:
-- **Quality of Data**: The output is only as good as the input—ensure your data is clean and well-structured.
-- **Chunk Size**: Proper chunking of data is crucial for optimal performance.
-- **Performance Evaluation**: Regularly assess the performance of your RAG-based application.
+## Overview
 
-This project allows you to interact directly with a GitHub repository and leverage semantic search to understand the codebase. Ask specific questions about the repository's code and receive meaningful, context-aware responses.
+Kimchi is an advanced hybrid AI system that:
 
-### Components
-- **Elasticsearch**: Serves as the vector database for efficient storage and retrieval of embeddings.
-- **LlamaIndex**: A framework for building applications powered by LLM.
-- **OpenAI**: Used for both the LLM and generating embeddings.
+- **Intelligently routes queries** using OpenAI to determine the optimal data source
+- **Combines RAG and MCP** for comprehensive repository analysis
+- **Provides contextual responses** by synthesizing static documentation with live GitHub data
+- **Supports private repositories** with proper authentication handling
+- **Scales efficiently** using Elasticsearch for vector storage and Docker for MCP isolation
 
-### Architecture
+## Project Structure
 
-![Github RAG](./images/github-rag.png)
+```
+kimchi/
+├── main.py                          # CLI entry point
+├── cli/
+│   ├── __init__.py                  # CLI package
+│   └── interface.py                 # Command-line interface logic
+├── core/
+│   ├── __init__.py                  # Core package exports
+│   ├── assistant.py                 # Main KimchiAssistant class
+│   └── query_router.py              # AI-powered query routing
+├── connectors/
+│   ├── __init__.py
+│   ├── elasticsearch_connector.py   # RAG vector search
+│   ├── github_connector.py          # GitHub API wrapper
+│   └── mcp_github_connector.py      # MCP protocol handler
+├── utils/
+│   ├── __init__.py
+│   ├── exceptions.py                # Custom exceptions
+│   └── logging.py                   # Logging configuration
+├── config.py                        # Configuration management
+├── data_pipeline.py                 # RAG data ingestion
+├── setup.py                         # Setup and validation script
+└── tests/                           # Test suite
+```
 
-The process starts by cloning a GitHub repository locally to the `/tmp` directory. The `SimpleDirectoryReader` is then used to load the cloned repository for indexing. Documents are split into chunks based on file type, utilizing `CodeSplitter` for code files, along with `JSON`, `Markdown`, and `SentenceSplitters` for other formats. After parsing the nodes, embeddings are generated using the `text-embedding-3-large` model and stored in Elasticsearch. This setup enables semantic search, allowing us to ask meaningful questions about the code.
+## Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   User Query    │───▶│  Query Router    │───▶│  Data Sources   │
+│    (CLI)        │    │  (AI-powered)    │    │                 │
+└─────────────────┘    └──────────────────┘    │  ┌─────────────┐ │
+                                ▲               │  │    RAG      │ │
+                                │               │  │(Elasticsearch)│ │
+                       ┌──────────────────┐    │  └─────────────┘ │
+                       │   Response       │    │  ┌─────────────┐ │
+                       │  Synthesizer     │    │  │    MCP      │ │
+                       │ (KimchiAssistant)│    │  │ (GitHub API)│ │
+                       └──────────────────┘    │  └─────────────┘ │
+                                │               └─────────────────┘
+                                ▼
+                       ┌──────────────────┐
+                       │ Synthesized      │
+                       │ Response         │
+                       └──────────────────┘
+```
+
+### Key Components
+
+- **CLI Interface** (`cli/interface.py`): User-facing command-line interface
+- **Core Assistant** (`core/assistant.py`): Main `KimchiAssistant` orchestrating all operations  
+- **Query Router** (`core/query_router.py`): AI-powered routing between RAG and MCP
+- **Connectors**: Modular connectors for different data sources
+- **Utils**: Shared utilities for logging, exceptions, and configuration
+
+## Features
+
+### Core Capabilities
+
+- **Hybrid Intelligence**: Automatically determines whether to use static knowledge (RAG) or live data (MCP) based on query context
+- **Private Repository Support**: Seamless access to private repositories using personal access tokens
+- **Vector Search**: Elasticsearch-powered semantic search across ingested documentation
+- **Live GitHub Data**: Real-time access to commits, issues, pull requests, and repository metadata
+- **AI-Powered Synthesis**: OpenAI-based response generation combining multiple data sources
+
+### Advanced Features
+
+- **Intelligent Query Routing**: AI-powered decision making for optimal data source selection
+- **Fallback Mechanisms**: Graceful degradation when services are unavailable
+- **Comprehensive Error Handling**: Robust error recovery and logging
+- **Async Architecture**: High-performance async/await implementation
+- **Clean Resource Management**: Proper connection pooling and cleanup
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.9+
+- Docker (for MCP services)
+- Elasticsearch Cloud account
+- OpenAI API key
+- GitHub Personal Access Token
 
 ### Installation
 
-1. **Clone the Repository**:
+1. **Clone the repository**
    ```bash
-   git clone https://github.com/framsouza/github-assistant.git
-   cd github-assistant
-    ```
+   git clone <repository-url>
+   cd kimchi
+   ```
 
-2. **Install Required Libraries**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-3. **Set Up Environment Variables**:
-Update the `.env` file with your Elasticsearch credentials and the target GitHub repository details (eg, `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BRANCH`, `ELASTIC_CLOUD_ID`, `ELASTIC_USER`, `ELASTIC_PASSWORD`, `ELASTIC_INDEX`).
-
-### Usage
-
-1. **Index your data and create the embeddings by running**:
+2. **Set up Python environment**
    ```bash
-   python index.py
-    ```
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-An Elasticsearch index will be generated, housing the embeddings. You can then connect to your ESS deployment and run search query against the index, you will see a new field named `embeddings`.
-
-2. **Ask questions about your codebase by running**:
+3. **Run setup validation**
    ```bash
-   python query.py
-    ```
-**Example:**
- ```
-python query.py                                    
-Please enter your query: Give me a detailed list of the external dependencies being used in this repository
+   python setup.py
+   ```
 
- Based on the provided context, the following is a list of third-party dependencies used in the given Elastic Cloud on K8s project:
-1. dario.cat/mergo (BSD-3-Clause, v1.0.0)
-2. Masterminds/sprig (MIT, v3.2.3)
-3. Masterminds/semver (MIT, v4.0.0)
-4. go-spew (ISC, v1.1.2-0.20180830191138-d8f796af33cc)
-5. elastic/go-ucfg (Apache-2.0, v0.8.8)
-6. ghodss/yaml (MIT, v1.0.0)
-7. go-logr/logr (Apache-2.0, v1.4.1)
-8. go-test/deep (MIT, v1.1.0)
-9. gobuffalo/flect (MIT, v1.0.2)
-10. google/go-cmp (BSD-3-Clause, v0.6.0)
-...
+4. **Configure environment**
+   ```bash
+   # Edit the generated .env file with your credentials
+   nano .env
+   ```
 
-This list includes both direct and indirect dependencies as identified in the context.None
- ```
+5. **Ingest repository data** (optional, for RAG functionality)
+   ```bash
+   python data_pipeline.py --owner elastic --repo eis-ray
+   ```
 
-Questions you might want to ask:
-- Give me a detailed description of what are the main functionalities implemented in the code?
-- How does the code handle errors and exceptions?
-- Could you evaluate the test coverage of this codebase and also provide detailed insights into potential enhancements to improve test coverage significantly?
+6. **Start the assistant**
+   ```bash
+   python main.py
+   ```
 
-### Evaluation
+### Environment Configuration
 
-The `evaluation.py` code processes documents, generates evaluation questions based on the content, and then evaluates the responses for relevancy (_Whether the response is relevant to the question_) and faithfulness (_Whether the response is faithful to the source content_) using a LLM. Here’s a step-by-step guide on how to use the code:
+The setup script creates a `.env` template file. Edit it with your credentials:
 
-```
-python evaluation.py --num_documents 5 --skip_documents 2 --num_questions 3 --skip_questions 1 --process_last_questions
-```
+```bash
+# Required: OpenAI API key for AI routing and response synthesis
+OPENAI_API_KEY=sk-xxxxxxxxxxxx
 
-You can run the code without any parameters, but the example above demonstrates how to use the parameters. Here's a breakdown of what each parameter does:
+# Optional but recommended: GitHub token for enhanced access
+GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+GITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxxxxxxxxxxx  # Alternative name
 
-##### Document Processing:
+# Optional: Elasticsearch configuration for RAG functionality
+ELASTICSEARCH_URL=http://localhost:9200
+ELASTICSEARCH_INDEX=kimchi_index
 
-- **--num_documents 5**: The script will process a total of 5 documents.
-- **--skip_documents 2**: The first 2 documents will be skipped, and the script will start processing from the 3rd document onward. So, it will process documents 3, 4, 5, 6, and 7.
+# Optional: Default GitHub repository for queries
+GITHUB_OWNER=your-username
+GITHUB_REPO=your-repository
+GITHUB_BRANCH=main
 
-##### Question Generation:
-
-After loading the documents, the script will generate a list of questions based on the content of these documents.
-- **--num_questions 3**: Out of the generated questions, only 3 will be processed.
-- **--skip_questions 1**: The script will skip the first question in the list and process questions starting from the 2nd question.
-- **--process_last_questions**: Instead of processing the first 3 questions after skipping the first one, the script will take the last 3 questions in the list.
-
-```
-Number of documents loaded: 5
-\All available questions generated:
-0. What is the purpose of chunking monitors in the updated push command as mentioned in the changelog?
-1. How does the changelog describe the improvement made to the performance of the push command?
-2. What new feature is added to the synthetics project when it is created via the `init` command?
-3. According to the changelog, what is the file size of the CHANGELOG.md document?
-4. On what date was the CHANGELOG.md file last modified?
-5. What is the significance of the example lightweight monitor yaml file mentioned in the changelog?
-6. How might the changes described in the changelog impact the workflow of users creating or updating monitors?
-7. What is the file path where the CHANGELOG.md document is located?
-8. Can you identify the issue numbers associated with the changes mentioned in the changelog?
-9. What is the creation date of the CHANGELOG.md file as per the context information?
-10. What type of file is the document described in the context information?
-11. On what date was the CHANGELOG.md file last modified?
-12. What is the file size of the CHANGELOG.md document?
-13. Identify one of the bug fixes mentioned in the CHANGELOG.md file.
-14. What command is referenced in the context of creating new synthetics projects?
-15. How does the CHANGELOG.md file address the issue of varying NDJSON chunked response sizes?
-16. What is the significance of the number #680 in the context of the document?
-17. What problem is addressed by skipping the addition of empty values for locations?
-18. How many bug fixes are explicitly mentioned in the provided context?
-19. What is the file path of the CHANGELOG.md document?
-20. What is the file path of the document being referenced in the context information?
-...
-
-Generated questions:
-1. What command is referenced in relation to the bug fix in the CHANGELOG.md?
-2. On what date was the CHANGELOG.md file created?
-3. What is the primary purpose of the document based on the context provided?
-
-Total number of questions generated: 3
-
-Processing Question 1 of 3:
-
-Evaluation Result:
-+---------------------------------------------------+-------------------------------------------------+----------------------------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-| Query                                             | Response                                        | Source                                             | Relevancy Response   | Relevancy Feedback   |   Relevancy Score | Faith Response   | Faith Feedback   |
-+===================================================+=================================================+====================================================+======================+======================+===================+==================+==================+
-| What command is referenced in relation to the bug | The `init` command is referenced in relation to | Bug Fixes                                          | Pass                 | YES                  |                 1 | Pass             | YES              |
-| fix in the CHANGELOG.md?                          | the bug fix in the CHANGELOG.md.                |                                                    |                      |                      |                   |                  |                  |
-|                                                   |                                                 |                                                    |                      |                      |                   |                  |                  |
-|                                                   |                                                 | - Pick the correct loader when bundling TypeScript |                      |                      |                   |                  |                  |
-|                                                   |                                                 | or JavaScript journey files                        |                      |                      |                   |                  |                  |
-|                                                   |                                                 |                                                    |                      |                      |                   |                  |                  |
-|                                                   |                                                 |   during push command #626                         |                      |                      |                   |                  |                  |
-+---------------------------------------------------+-------------------------------------------------+----------------------------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-
-Processing Question 2 of 3:
-
-Evaluation Result:
-+-------------------------------------------------+------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-| Query                                           | Response                                       | Source                       | Relevancy Response   | Relevancy Feedback   |   Relevancy Score | Faith Response   | Faith Feedback   |
-+=================================================+================================================+==============================+======================+======================+===================+==================+==================+
-| On what date was the CHANGELOG.md file created? | The date mentioned in the CHANGELOG.md file is | v1.0.0-beta-38 (20222-11-02) | Pass                 | YES                  |                 1 | Pass             | YES              |
-|                                                 | November 2, 2022.                              |                              |                      |                      |                   |                  |                  |
-+-------------------------------------------------+------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-
-Processing Question 3 of 3:
-
-Evaluation Result:
-+---------------------------------------------------+---------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-| Query                                             | Response                                          | Source                       | Relevancy Response   | Relevancy Feedback   |   Relevancy Score | Faith Response   | Faith Feedback   |
-+===================================================+===================================================+==============================+======================+======================+===================+==================+==================+
-| What is the primary purpose of the document based | The primary purpose of the document is to provide | v1.0.0-beta-38 (20222-11-02) | Pass                 | YES                  |                 1 | Pass             | YES              |
-| on the context provided?                          | a changelog detailing the features and            |                              |                      |                      |                   |                  |                  |
-|                                                   | improvements made in version 1.0.0-beta-38 of a   |                              |                      |                      |                   |                  |                  |
-|                                                   | software project. It highlights specific          |                              |                      |                      |                   |                  |                  |
-|                                                   | enhancements such as improved validation for      |                              |                      |                      |                   |                  |                  |
-|                                                   | monitor schedules and an enhanced push command    |                              |                      |                      |                   |                  |                  |
-|                                                   | experience.                                       |                              |                      |                      |                   |                  |                  |
-+---------------------------------------------------+---------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+
-(clean_env) (base) framsouza@Frams-MacBook-Pro-2 git-assistant % 
-+-------------------------------------------------+------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+------+------------------+
-
-Processing Question 3 of 3:
-
-Evaluation Result:
-+---------------------------------------------------+---------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+-----------+------------------+
-| Query                                             | Response                                          | Source                       | Relevancy Response   | Relevancy Feedback   |   Relevancy Score | Faith Response   | Faith Feedback   |Response   | Faith Feedback   |
-+===================================================+===================================================+==============================+======================+======================+===================+==================+==================+===========+==================+
-| What is the primary purpose of the document based | The primary purpose of the document is to provide | v1.0.0-beta-38 (20222-11-02) | Pass                 | YES                  |                 1 | Pass             | YES              |           | YES              |
-| on the context provided?                          | a changelog detailing the features and            |                              |                      |                      |                   |                  |                  |           |                  |
-|                                                   | improvements made in version 1.0.0-beta-38 of a   |                              |                      |                      |                   |                  |                  |           |                  |
-|                                                   | software project. It highlights specific          |                              |                      |                      |                   |                  |                  |           |                  |
-|                                                   | enhancements such as improved validation for      |                              |                      |                      |                   |                  |                  |           |                  |
-|                                                   | monitor schedules and an enhanced push command    |                              |                      |                      |                   |                  |                  |           |                  |
-|                                                   | experience.                                       |                              |                      |                      |                   |                  |                  |           |                  |
-+---------------------------------------------------+---------------------------------------------------+------------------------------+----------------------+----------------------+-------------------+------------------+------------------+-----------+------------------+
+# Optional: Configuration flags
+VERBOSE=true
+SHOW_PROGRESS=true
 ```
 
-# Now what?
+### Minimal Configuration
 
-Here are a few ways you can utilize this code:
+For basic functionality, you only need:
 
-- Gain insights into a specific GitHub repository by asking questions about the code, such as locating functions or understanding how parts of the code work.
-- Build a multi-agent RAG system that ingests GitHub PRs and issues, enabling automatic responses to issues and feedback on PRs.
-- Combine your logs and metrics with the GitHub code in Elasticsearch to create a Production Readiness Review using RAG, helping assess the maturity of your services.
+```bash
+OPENAI_API_KEY=sk-xxxxxxxxxxxx
+```
 
-Happy RAG!
+The assistant will work in MCP-only mode for live GitHub data queries.
+
+## Usage
+
+### Interactive Mode
+
+```bash
+python main.py
+```
+
+Start an interactive session where you can:
+- Ask questions about repositories
+- Get routing explanations with `status` command
+- Use `help` for example queries
+- Exit with `quit` or `exit`
+
+### Single Query Mode
+
+```bash
+python main.py "What are the recent commits?"
+python main.py "How should I set up CI/CD for this project?"
+```
+
+Process a single query and exit - perfect for automation and scripting.
+
+### Debug Mode
+
+```bash
+python main.py "your question" --debug
+```
+
+Shows detailed routing decisions, confidence scores, and error traces.
+
+### Data Ingestion (RAG Setup)
+
+```bash
+# Ingest a specific repository for RAG
+python data_pipeline.py --owner microsoft --repo vscode
+
+# Force re-ingestion of existing data
+python data_pipeline.py --force-reclone
+
+# Update existing repository data
+python data_pipeline.py --update-repo
+```
+
+## Query Types
+
+The system automatically routes queries to appropriate data sources:
+
+### Knowledge Queries (RAG)
+- "How do I configure GPU support?"
+- "What are the best practices for deployment?"
+- "Explain the architecture of this system"
+
+### Live Data Queries (MCP)
+- "What are the recent commits?"
+- "Show me open issues"
+- "Who are the main contributors?"
+
+### Hybrid Queries
+- "Analyze the current repository state and suggest improvements"
+- "Review recent changes and provide deployment guidance"
+
+## System Components
+
+### Query Router
+- **Purpose**: Intelligent query classification and routing
+- **Technology**: OpenAI GPT-4 with custom prompting
+- **Function**: Determines optimal data source (RAG, MCP, or hybrid)
+
+### RAG System
+- **Vector Store**: Elasticsearch with OpenAI embeddings
+- **Document Processing**: LlamaIndex with markdown and code parsers
+- **Search**: Semantic similarity search with configurable ranking
+
+### MCP Integration
+- **GitHub Connector**: Docker-isolated GitHub API access
+- **Real-time Data**: Live repository metadata and content
+- **Authentication**: Personal access token with SSO support
+
+### Response Synthesis
+- **AI Integration**: OpenAI GPT-4 for response generation
+- **Context Fusion**: Combines multiple data sources intelligently
+- **Quality Control**: Confidence scoring and source attribution
+
+## Configuration
+
+### Advanced Settings
+
+Modify `config.py` for advanced configuration:
+
+```python
+# Elasticsearch settings
+ELASTICSEARCH_CONFIG = {
+    "batch_size": 100,
+    "max_retries": 3,
+    "request_timeout": 30,
+}
+
+# Embedding settings
+EMBEDDING_MODEL = "text-embedding-3-large"
+
+# Query routing thresholds
+ROUTING_CONFIDENCE_THRESHOLD = 0.7
+```
+
+### Custom Parsers
+
+Add custom document parsers in `connectors/elasticsearch_connector.py`:
+
+```python
+# Add new file type support
+SUPPORTED_EXTENSIONS = {
+    '.py', '.js', '.ts', '.md', '.rst', '.txt',
+    '.json', '.yaml', '.yml', '.toml'
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Errors**
+   - Verify GitHub token has correct permissions
+   - For SSO organizations, re-authorize the token
+   - Check token expiration
+
+2. **Elasticsearch Connection**
+   - Verify cloud ID and credentials
+   - Check network connectivity
+   - Ensure index exists or has proper permissions
+
+3. **OpenAI API Issues**
+   - Verify API key validity
+   - Check quota and billing status
+   - Monitor rate limits
+
+### Debug Mode
+
+Enable debug logging:
+
+```bash
+python main.py --debug
+```
+
+### Performance Optimization
+
+- Use smaller batch sizes for memory-constrained environments
+- Adjust embedding model based on accuracy/speed requirements
+- Configure Elasticsearch cluster for high-throughput scenarios
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Implement changes with tests
+4. Submit a pull request
+
+### Development Setup
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+python -m pytest tests/
+
+# Code formatting
+black kimchi/
+isort kimchi/
+```
+
+## API Reference
+
+### Core Classes
+
+#### KimchiAssistant
+
+Main assistant class for hybrid RAG + MCP operations.
+
+```python
+from core.assistant import KimchiAssistant
+
+# Initialize and use
+assistant = KimchiAssistant()
+await assistant.initialize()
+
+# Answer questions
+response = await assistant.answer_question("What are recent commits?")
+print(response["synthesized_answer"])
+
+# Get system status  
+status = assistant.get_status()
+print(f"RAG available: {status['rag_available']}")
+print(f"MCP available: {status['mcp_available']}")
+
+# Cleanup when done
+await assistant.cleanup()
+```
+
+#### KimchiCLI
+
+Command-line interface for the assistant.
+
+```python
+from cli.interface import KimchiCLI
+
+# Create CLI instance
+cli = KimchiCLI()
+
+# Run single query
+await cli.run_single_query("How do I deploy this?")
+
+# Run interactive session
+await cli.run_interactive()
+```
+
+#### QueryRouter
+
+AI-powered query routing between data sources.
+
+```python
+from core.query_router import QueryRouter, QueryType
+
+router = QueryRouter()
+decision = await router.route_query("Show me recent commits")
+
+print(f"Route: {decision.query_type}")
+print(f"Confidence: {decision.confidence}")
+print(f"Reasoning: {decision.reasoning}")
+```
+
+### Configuration Classes
+
+```python
+from config import load_config
+
+# Load application configuration
+config = load_config()
+print(f"GitHub owner: {config.github.owner}")
+print(f"Elasticsearch index: {config.elasticsearch.index_name}")
+```
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For issues and questions:
+- Check the troubleshooting section
+- Review the technical documentation
+- Submit an issue on GitHub
+
+---
+
+**Note**: This system handles sensitive data including API keys and repository content. Ensure proper security practices in production deployments.
